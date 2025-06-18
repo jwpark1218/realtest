@@ -203,87 +203,100 @@ class EDA:
 
         df = pd.read_csv(uploaded)
 
-        # 탭 구조
-        tabs = st.tabs([
-            "기초 통계", "연도별 추이", "지역별 분석", "변화량 분석", "시각화"
-        ])
+        # 기본 전처리 및 변환
+        mask = df['지역'] == '세종'
+        df.loc[mask] = df.loc[mask].replace('-', 0)
+        for col in ['인구', '출생아수(명)', '사망자수(명)']:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
 
-        # 1) 기초 통계
+        # 지역명 영문 매핑
+        eng_map = {
+            '서울': 'Seoul', '부산': 'Busan', '대구': 'Daegu', '인천': 'Incheon', '광주': 'Gwangju',
+            '대전': 'Daejeon', '울산': 'Ulsan', '세종': 'Sejong', '경기': 'Gyeonggi-do', '강원': 'Gangwon-do',
+            '충북': 'Chungbuk', '충남': 'Chungnam', '전북': 'Jeonbuk', '전남': 'Jeonnam', '경북': 'Gyeongbuk',
+            '경남': 'Gyeongnam', '제주': 'Jeju'
+        }
+        df['Region_EN'] = df['지역'].map(eng_map).fillna(df['지역'])
+
+        # 탭 구성
+        tabs = st.tabs(["Basic Stats", "Time Trend", "Region Analysis", "Change Rate", "Visualization"])
+
+        # 1) Basic Stats
         with tabs[0]:
-            st.header("🔍 기초 통계")
-            st.subheader("결측치 및 중복 확인")
-            missing = df.isnull().sum()
-            st.write(missing)
-            dup = df.duplicated().sum()
-            st.write(f"중복 행 개수: {dup}개")
+            st.header("Data Preprocessing & Summary")
+            st.subheader("Missing Values & Duplicates")
+            st.write(df.isnull().sum())
+            st.write(f"Duplicates: {df.duplicated().sum()}")
+            st.subheader("Descriptive Statistics")
+            st.write(df.describe())
+            st.subheader("DataFrame Info")
+            buf = io.StringIO()
+            df.info(buf=buf)
+            st.text(buf.getvalue())
 
-            st.subheader("기초 통계 요약")
-            st.dataframe(df.describe())
-
-        # 2) 연도별 전체 인구 추이
+        # 2) Time Trend
         with tabs[1]:
-            st.header("📈 연도별 전체 인구 추이")
-            total = (
-                df[df['지역'] == '전국']
-                  .groupby('연도')['인구']
-                  .sum()
-                  .reset_index()
-            )
+            st.header("National Population Trend & Forecast")
+            national = df[df['지역'] == '전국'].groupby('연도')['인구'].sum().reset_index()
+            last_year = national['연도'].max()
+            recent = df[(df['지역'] == '전국') & (df['연도'].isin([last_year-2, last_year-1, last_year]))]
+            avg_births = recent['출생아수(명)'].mean()
+            avg_deaths = recent['사망자수(명)'].mean()
+            avg_change = avg_births - avg_deaths
+            forecast_years = list(range(last_year+1, 2036))
+            forecast_vals = [national.loc[national['연도']==last_year, '인구'].values[0] + avg_change*(y-last_year) for y in forecast_years]
+            forecast_df = pd.DataFrame({'연도': forecast_years, '인구': forecast_vals, 'Type': 'Forecast'})
+            national['Type'] = 'Actual'
+            plot_df = pd.concat([national, forecast_df], ignore_index=True)
             fig, ax = plt.subplots()
-            ax.plot(total['연도'], total['인구'], marker='o')
-            ax.set_xlabel('연도')
-            ax.set_ylabel('인구')
-            ax.set_title('연도별 전국 인구 추이')
+            for t, grp in plot_df.groupby('Type'):
+                ax.plot(grp['연도'], grp['인구'], marker='o', label=t)
+            ax.set_xlabel('Year')
+            ax.set_ylabel('Population')
+            ax.set_title('National Population Trend')
+            ax.legend()
             st.pyplot(fig)
 
-        # 3) 지역별 분석
+        # 3) Region Analysis
         with tabs[2]:
-            st.header("🏙️ 지역별 인구 변화량 순위")
+            st.header("5-Year Population Change by Region")
             recent_year = df['연도'].max()
             prev_year = recent_year - 5
-            df_sel = df[df['연도'].isin([prev_year, recent_year])]
-            pivot = df_sel.pivot(index='지역', columns='연도', values='인구')
-            pivot = pivot.drop('전국', errors=True)
-            pivot['변화량'] = pivot[recent_year] - pivot[prev_year]
-            rank = pivot['변화량'].sort_values(ascending=False)
-
+            sel = df[df['연도'].isin([prev_year, recent_year])]
+            pivot = sel.pivot(index='Region_EN', columns='연도', values='인구').drop('전국', errors=True)
+            pivot['Change'] = pivot[recent_year] - pivot[prev_year]
+            pivot['Change_k'] = pivot['Change']/1000
+            pivot = pivot.sort_values('Change', ascending=False)
             fig2, ax2 = plt.subplots()
-            sns.barplot(x=rank.values, y=rank.index, ax=ax2)
-            ax2.set_xlabel('인구 변화량 (명)')
-            ax2.set_ylabel('지역')
-            ax2.set_title(f'{prev_year}년 대비 {recent_year}년 인구 변화량')
+            sns.barplot(x='Change_k', y=pivot.index, data=pivot, ax=ax2)
+            ax2.set_xlabel('Change (Thousands)')
+            ax2.set_ylabel('Region')
+            ax2.set_title('5-Year Population Change by Region')
+            for i, (val,) in enumerate(pivot['Change_k'].items()):
+                ax2.text(val, i, f"{val:.1f}", va='center')
             st.pyplot(fig2)
+            st.markdown("This chart shows the 5-year population change for each region. Positive = growth, Negative = decline.")
 
-        # 4) 증감률 상위 지역 및 연도 도출
+        # 4) Change Rate
         with tabs[3]:
-            st.header("📊 증감률 상위 지역 및 연도")
-            df_sorted = df.sort_values(['지역', '연도'])
-            df_sorted['diff'] = df_sorted.groupby('지역')['인구'].diff()
-            df_sorted['rate'] = df_sorted.groupby('지역')['인구'].pct_change()
-            top100 = (
-                df_sorted.dropna(subset=['rate'])
-                         .nlargest(100, 'rate')
-                         [['지역', '연도', 'diff', 'rate']]
-            )
-            # 컬러바 스타일링
-            styled = top100.style.background_gradient(subset=['diff'], cmap='Blues')
-            styled = styled.background_gradient(subset=['rate'], cmap='Reds')
-            st.dataframe(styled.format({
-                'diff': '{:,.0f}',
-                'rate': '{:.2%}'
-            }))
+            st.header("Top 100 Population Changes")
+            df_s = df[df['지역']!='전국'].sort_values(['Region_EN','연도'])
+            df_s['diff'] = df_s.groupby('Region_EN')['인구'].diff()
+            df_s['rate'] = df_s.groupby('Region_EN')['인구'].pct_change()
+            top100 = df_s.dropna(subset=['diff']).nlargest(100, 'diff')[['Region_EN','연도','diff','rate']]
+            def color_diff(val): return 'background-color: lightblue' if val>0 else 'background-color: lightcoral'
+            styled = top100.style.applymap(color_diff, subset=['diff']).format({'diff':'{:,}','rate':'{:.2%}'})
+            st.dataframe(styled)
 
-        # 5) 누적 영역 그래프
+        # 5) Visualization
         with tabs[4]:
-            st.header("🗺️ 누적 영역 그래프")
-            pivot2 = df.pivot_table(
-                index='연도', columns='지역', values='인구', aggfunc='sum'
-            )
-            fig3, ax3 = plt.subplots(figsize=(10, 6))
-            pivot2.plot.area(ax=ax3)
-            ax3.set_xlabel('연도')
-            ax3.set_ylabel('인구')
-            ax3.set_title('지역별 누적 인구 추이')
+            st.header("Population by Region Over Time (Area Chart)")
+            pv = df.pivot_table(index='Region_EN', columns='연도', values='인구')
+            fig3, ax3 = plt.subplots(figsize=(12,8))
+            pv.T.plot.area(ax=ax3)
+            ax3.set_xlabel('Year')
+            ax3.set_ylabel('Population')
+            ax3.set_title('Population by Region Over Time')
             st.pyplot(fig3)
 
 
