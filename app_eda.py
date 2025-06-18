@@ -313,25 +313,31 @@ if __name__ == "__main__":
     st.set_page_config(page_title="Population Trends EDA")
     EDA()
 
+# ---------------------
+# 페이지 네비게이션
+# ---------------------
+PAGES = {
+    "Home": Home,
+    "Login": Login,
+    "Register": lambda: Register("login"),
+    "Find Password": FindPassword,
+    "My Info": UserInfo,
+    "Logout": Logout,
+    "EDA": EDA
+}
 
-# ---------------------
-# 페이지 객체 생성
-# ---------------------
-Page_Login    = st.Page(Login,    title="Login",    icon="🔐", url_path="login")
-Page_Register = st.Page(lambda: Register(Page_Login.url_path), title="Register", icon="📝", url_path="register")
-Page_FindPW   = st.Page(FindPassword, title="Find PW", icon="🔎", url_path="find-password")
-Page_Home     = st.Page(lambda: Home(Page_Login, Page_Register, Page_FindPW), title="Home", icon="🏠", url_path="home", default=True)
-Page_User     = st.Page(UserInfo, title="My Info", icon="👤", url_path="user-info")
-Page_Logout   = st.Page(Logout,   title="Logout",  icon="🔓", url_path="logout")
-Page_EDA      = st.Page(EDA,      title="EDA",     icon="📊", url_path="eda")
+def main():
+    st.sidebar.title("Navigation")
+    if st.session_state.logged_in:
+        choices = ["Home", "My Info", "Logout", "EDA"]
+    else:
+        choices = ["Home", "Login", "Register", "Find Password"]
+    choice = st.sidebar.radio("Go to", choices)
 
-# ---------------------
-# 네비게이션 실행
-# ---------------------
-if st.session_state.logged_in:
-    pages = [Page_Home, Page_User, Page_Logout, Page_EDA]
-else:
-    pages = [Page_Home, Page_Login, Page_Register, Page_FindPW]
+    # 선택된 페이지 클래스 호출
+    page = PAGES[choice]
+    page()
 
-selected_page = st.navigation(pages)
-selected_page.run()
+if __name__ == "__main__":
+    st.set_page_config(page_title="Population Trends EDA")
+    main()
